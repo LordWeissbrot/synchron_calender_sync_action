@@ -112,7 +112,7 @@ def fetch_future_events(service):
     events_result = service.events().list(
         calendarId='primary',
         timeMin=now,
-        maxResults=10,
+        maxResults=20, #30
         singleEvents=True,
         orderBy='startTime'
     ).execute()
@@ -120,10 +120,10 @@ def fetch_future_events(service):
     return events
 
 def event_exists(service, summary, start_time, end_time):
-    time_min = (start_time - timedelta(minutes=1)).isoformat() + 'Z'
-    time_max = (end_time + timedelta(minutes=1)).isoformat() + 'Z'
+    time_min = (start_time - timedelta(minutes=1)).isoformat() + '+02:00'
+    time_max = (end_time + timedelta(minutes=1)).isoformat() + '+02:00'
     
-    print("Checking if event already exists in Google Calendar...")
+    print(f"Checking if event {summary}, Start: {start_time.isoformat() + '+02:00'}, End: {end_time.isoformat() + '+02:00'} already exists in Google Calendar...")
     events_result = service.events().list(
         calendarId='primary',
         timeMin=time_min,
@@ -134,7 +134,13 @@ def event_exists(service, summary, start_time, end_time):
     events = events_result.get('items', [])
 
     for event in events:
-        if event['summary'] == summary and event['start']['dateTime'] == start_time.isoformat() + 'Z' and event['end']['dateTime'] == end_time.isoformat() + 'Z':
+        event_start = event['start']['dateTime']
+        event_end = event['end']['dateTime']
+        event_summary = event['summary']
+
+        # Print statements for debugging
+        print(f"Comparing with event: {event_summary}, Start: {event_start}, End: {event_end}")
+        if event_summary == summary and event_start == start_time.isoformat() + '+02:00' and event_end == end_time.isoformat() + '+02:00':
             return True
     return False
 
@@ -194,7 +200,6 @@ def main():
 
         if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
             create_google_calendar_event(service, appointment['studio_name'], appointment['address'], start_datetime, end_datetime)
-            print(f"Created event: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
         else:
             print(f"Event already exists: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
 
