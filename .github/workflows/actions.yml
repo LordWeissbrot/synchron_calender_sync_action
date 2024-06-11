@@ -2,7 +2,7 @@ name: run Synchron to Google Calendar
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
 
 jobs:
   sync-calendar:
