@@ -2,9 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
-
-# import google calendar api
-import googleapiclient.discovery
+import logging
+import logging.handlers
 
 # Load environment variables from credentials.env file
 load_dotenv('credentials.env')
@@ -25,7 +24,6 @@ response = session.get(base_url)
 soup = BeautifulSoup(response.text, 'html.parser')
 csrf_token_element = soup.find('input', {'name': '_token'})
 csrf_token = csrf_token_element['value'] if csrf_token_element else ''
-print(csrf_token)
 
 # Prepare the login payload
 login_payload = {
@@ -34,9 +32,25 @@ login_payload = {
     '_token': csrf_token
 }
 
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+logger_file_handler = logging.handlers.RotatingFileHandler(
+    "status.log",
+    maxBytes=1024 * 1024,
+    backupCount=1,
+    encoding="utf8",
+)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+logger_file_handler.setFormatter(formatter)
+logger.addHandler(logger_file_handler)
+
+# Log the CSRF token retrieval
+logger.info(f"Retrieved CSRF token: {csrf_token}")
+
 # Send a POST request to the login URL with the login payload
 login_response = session.post(login_url, data=login_payload)
-print(login_response)
+logger.info(f"Login response status: {login_response.status_code}")
 
 # Check if the login was successful
 if login_response.status_code == 200 and 'Termine' in login_response.text:
@@ -76,9 +90,26 @@ if login_response.status_code == 200 and 'Termine' in login_response.text:
             }
             appointments.append(appointment)
 
-    # Print the extracted appointments
+    # Log the extracted appointments
     for appointment in appointments:
-        print("{}, {} - {}, {}, {}".format(appointment['date'], appointment['start_time'], appointment['end_time'], appointment['studio_name'], appointment['address']))
+        logger.info(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}")
 else:
-    print('Login failed. Please check your credentials.')
+    logger.error('Login failed. Please check your credentials.')
 
+# Example logging for another task (weather fetching)
+try:
+    SOME_SECRET = os.environ["SOME_SECRET"]
+except KeyError:
+    SOME_SECRET = "Token not available!"
+    logger.error("Token not available!")
+
+if __name__ == "__main__":
+    logger.info(f"Token value: {SOME_SECRET}")
+
+    r = requests.get('https://weather.talkpython.fm/api/weather/?city=Berlin&country=DE')
+    if r.status_code == 200:
+        data = r.json()
+        temperature = data["forecast"]["temp"]
+        logger.info(f'Weather in Berlin: {temperature}')
+    else:
+        logger.error(f'Failed to fetch weather data, status code: {r.status_code}')
