@@ -138,6 +138,23 @@ def event_exists(service, summary, start_time, end_time):
             return True
     return False
 
+def create_google_calendar_event(service, summary, location, start_time, end_time):
+    event = {
+        'summary': summary,
+        'location': location,
+        'start': {
+            'dateTime': start_time.isoformat(),
+            'timeZone': 'Europe/Berlin',
+        },
+        'end': {
+            'dateTime': end_time.isoformat(),
+            'timeZone': 'Europe/Berlin',
+        },
+    }
+
+    event = service.events().insert(calendarId='primary', body=event).execute()
+    print(f"Event created: {event.get('htmlLink')}")
+
 def main():
     print("Starting main function...")
     # Filter out past appointments
@@ -176,7 +193,10 @@ def main():
         end_datetime = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
 
         if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
-            print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
+            create_google_calendar_event(service, appointment['studio_name'], appointment['address'], start_datetime, end_datetime)
+            print(f"Created event: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
+        else:
+            print(f"Event already exists: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
 
 if __name__ == "__main__":
     main()
