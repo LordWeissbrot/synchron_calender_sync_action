@@ -47,6 +47,7 @@ logger_file_handler = logging.handlers.RotatingFileHandler(
     backupCount=1,
     encoding="utf8",
 )
+logger_file_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger_file_handler.setFormatter(formatter)
 logger.addHandler(logger_file_handler)
@@ -165,14 +166,14 @@ def main():
 
     # Fetch future events from Google Calendar
     future_events = fetch_future_events(service)
-    logger.debug("\nFuture events from Google Calendar:")
+    logger.debug("Future events from Google Calendar:")
     for event in future_events:
         start = event['start'].get('dateTime', event['start'].get('date'))
         end = event['end'].get('dateTime', event['end'].get('date'))
         logger.debug(f"Summary: {event['summary']}, Start: {start}, End: {end}")
 
     # Log the appointments that would get created
-    logger.debug("\nAppointments to be created in Google Calendar:")
+    logger.debug("Appointments to be created in Google Calendar:")
     for appointment in future_appointments:
         start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
         end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
