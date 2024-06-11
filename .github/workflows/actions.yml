@@ -1,4 +1,4 @@
-name: Synchron to Google Calendar
+name: run Synchron to Google Calendar
 
 on:
   schedule:
