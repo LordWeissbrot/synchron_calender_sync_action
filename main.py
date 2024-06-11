@@ -2,29 +2,12 @@ import requests
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 import os
-import logging
-import logging.handlers
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta
 
 # Load environment variables from credentials.env file
 load_dotenv('credentials.env')
-
-# Set up logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-logger_file_handler = logging.handlers.RotatingFileHandler(
-    "status.log",
-    maxBytes=1024 * 1024,
-    backupCount=1,
-    encoding="utf8",
-)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger_file_handler.setFormatter(formatter)
-logger.addHandler(logger_file_handler)
-
-logger.debug("Starting script execution...")
 
 # Retrieve credentials from environment variables
 username = os.getenv('USERNAME')
@@ -33,6 +16,8 @@ client_id = os.getenv('CLIENT_ID')
 client_secret = os.getenv('CLIENT_SECRET')
 refresh_token = os.getenv('REFRESH_TOKEN')
 
+print("Starting script execution...")
+
 base_url = 'https://login.synchron.de'
 login_url = 'https://login.synchron.de/login?is_app=0'
 appointments_url = 'https://login.synchron.de/events?is_app=0'
@@ -40,7 +25,7 @@ appointments_url = 'https://login.synchron.de/events?is_app=0'
 # Create a session
 session = requests.Session()
 
-logger.debug("Created session. Sending GET request to base URL...")
+print("Created session. Sending GET request to base URL...")
 
 # Send a GET request to the base URL to retrieve the CSRF token
 response = session.get(base_url)
@@ -48,7 +33,7 @@ soup = BeautifulSoup(response.text, 'html.parser')
 csrf_token_element = soup.find('input', {'name': '_token'})
 csrf_token = csrf_token_element['value'] if csrf_token_element else ''
 
-logger.debug(f"Retrieved CSRF token: {csrf_token}")
+print(f"Retrieved CSRF token: {csrf_token}")
 
 # Prepare the login payload
 login_payload = {
@@ -57,17 +42,17 @@ login_payload = {
     '_token': csrf_token
 }
 
-logger.debug("Sending POST request to login URL...")
+print("Sending POST request to login URL...")
 
 # Send a POST request to the login URL with the login payload
 login_response = session.post(login_url, data=login_payload)
-logger.info(f"Login response status: {login_response.status_code}")
+print(f"Login response status: {login_response.status_code}")
 
 appointments = []
 
 # Check if the login was successful
 if login_response.status_code == 200 and 'Termine' in login_response.text:
-    logger.debug("Login successful. Sending GET request to appointments URL...")
+    print("Login successful. Sending GET request to appointments URL...")
     
     # Send a GET request to the appointments page
     appointments_response = session.get(appointments_url)
@@ -105,12 +90,12 @@ if login_response.status_code == 200 and 'Termine' in login_response.text:
 
     # Log the extracted appointments
     for appointment in appointments:
-        logger.debug(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}")
+        print(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}")
 else:
-    logger.error('Login failed. Please check your credentials.')
+    print('Login failed. Please check your credentials.')
 
 def authenticate_google_api():
-    logger.debug("Authenticating Google Calendar API...")
+    print("Authenticating Google Calendar API...")
     creds = Credentials(
         None,
         refresh_token=refresh_token,
@@ -123,7 +108,7 @@ def authenticate_google_api():
 
 def fetch_future_events(service):
     now = datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
-    logger.debug("Fetching future events from Google Calendar...")
+    print("Fetching future events from Google Calendar...")
     events_result = service.events().list(
         calendarId='primary',
         timeMin=now,
@@ -138,7 +123,7 @@ def event_exists(service, summary, start_time, end_time):
     time_min = (start_time - timedelta(minutes=1)).isoformat() + 'Z'
     time_max = (end_time + timedelta(minutes=1)).isoformat() + 'Z'
     
-    logger.debug("Checking if event already exists in Google Calendar...")
+    print("Checking if event already exists in Google Calendar...")
     events_result = service.events().list(
         calendarId='primary',
         timeMin=time_min,
@@ -154,7 +139,7 @@ def event_exists(service, summary, start_time, end_time):
     return False
 
 def main():
-    logger.debug("Starting main function...")
+    print("Starting main function...")
     # Filter out past appointments
     current_date = datetime.now()
     future_appointments = []
@@ -167,23 +152,23 @@ def main():
             future_appointments.append(appointment)
 
     # Log the future appointments for testing
-    logger.debug("Future appointments from Synchron.de:")
+    print("Future appointments from Synchron.de:")
     for appointment in future_appointments:
-        logger.debug(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
+        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
 
     # Authenticate Google Calendar API
     service = authenticate_google_api()
 
     # Fetch future events from Google Calendar
     future_events = fetch_future_events(service)
-    logger.debug("Future events from Google Calendar:")
+    print("Future events from Google Calendar:")
     for event in future_events:
         start = event['start'].get('dateTime', event['start'].get('date'))
         end = event['end'].get('dateTime', event['end'].get('date'))
-        logger.debug(f"Summary: {event['summary']}, Start: {start}, End: {end}")
+        print(f"Summary: {event['summary']}, Start: {start}, End: {end}")
 
     # Log the appointments that would get created
-    logger.debug("Appointments to be created in Google Calendar:")
+    print("Appointments to be created in Google Calendar:")
     for appointment in future_appointments:
         start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
         end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
@@ -191,8 +176,8 @@ def main():
         end_datetime = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
 
         if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
-            logger.debug(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
+            print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
 
 if __name__ == "__main__":
     main()
-    logger.info("Main function executed successfully.")
+    print("Main function executed successfully.")
