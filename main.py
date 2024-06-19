@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Load environment variables from credentials.env file
 load_dotenv('credentials.env')
@@ -102,12 +102,13 @@ def authenticate_google_api():
         token_uri="https://oauth2.googleapis.com/token",
         client_id=client_id,
         client_secret=client_secret,
+        scopes=['https://www.googleapis.com/auth/calendar']
     )
     service = build('calendar', 'v3', credentials=creds)
     return service
 
 def fetch_future_events(service):
-    now = datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
+    now = datetime.now(timezone.utc).isoformat()
     print("Fetching future events from Google Calendar...")
     events_result = service.events().list(
         calendarId='primary',
