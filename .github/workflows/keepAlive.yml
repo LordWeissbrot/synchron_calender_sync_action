@@ -1,27 +1,20 @@
-name: Github Action with a cronjob trigger
+name: Keep Repository Active
+
 on:
   schedule:
-    - cron: "0 0 * * *"
-      workflow_dispatch:  # Add manual trigger
+    - cron: '0 0 1 * *'  # Run at 00:00 on the first day of every month
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
-  main-job:
-    name: Main Job
+  keep-alive:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # - step1
-      # - step 2
-      # - Step N
-  keepalive-job:
-    name: Keepalive Workflow
-    if: ${{ always() }}
-    needs: main-job
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: gautamkrishnar/keepalive-workflow@v2
-        with:
-          use_api: false
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Create empty commit
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git commit --allow-empty -m "Keep repository active"
+          git push
