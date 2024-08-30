@@ -2,6 +2,8 @@ name: Github Action with a cronjob trigger
 on:
   schedule:
     - cron: "0 0 * * *"
+      workflow_dispatch:  # Add manual trigger
+
 jobs:
   main-job:
     name: Main Job
