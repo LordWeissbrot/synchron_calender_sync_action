@@ -74,23 +74,41 @@ if login_response.status_code == 200 and 'Termine' in login_response.text:
             start_time = time_range[:5]  # First 5 characters for start time
             end_time = time_range[5:].strip()  # Remaining characters for end time
 
+            # Get studio name
             studio_name_element = columns[1].find('b')
             studio_name = studio_name_element.get_text(strip=True) if studio_name_element else ''
 
-            address = columns[1].get_text(strip=True).replace(studio_name, '').strip()
+            # Get all text from columns[1], excluding the studio name
+            column_texts = list(columns[1].stripped_strings)
+            # Remove the studio name from the list
+            if studio_name in column_texts:
+                column_texts.remove(studio_name)
+
+            # Initialize address and regie
+            address = ''
+            regie = ''
+
+            for text in column_texts:
+                if text.startswith('Regie:'):
+                    regie = text
+                else:
+                    address += text + ' '
+
+            address = address.strip()
 
             appointment = {
                 'date': date,
                 'start_time': start_time,
                 'end_time': end_time,
                 'studio_name': studio_name,
-                'address': address
+                'address': address,
+                'regie': regie
             }
             appointments.append(appointment)
 
     # Log the extracted appointments
     for appointment in appointments:
-        print(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}")
+        print(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}, {appointment['regie']}")
 else:
     print('Login failed. Please check your credentials.')
 
@@ -145,10 +163,11 @@ def event_exists(service, summary, start_time, end_time):
             return True
     return False
 
-def create_google_calendar_event(service, summary, location, start_time, end_time):
+def create_google_calendar_event(service, summary, location, start_time, end_time, description=''):
     event = {
         'summary': summary,
         'location': location,
+        'description': description,
         'start': {
             'dateTime': start_time.isoformat(),
             'timeZone': 'Europe/Berlin',
@@ -178,7 +197,7 @@ def main():
     # Log the future appointments for testing
     print("Future appointments from Synchron.de:")
     for appointment in future_appointments:
-        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}")
+        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}, Regie: {appointment['regie']}")
 
     # Authenticate Google Calendar API
     service = authenticate_google_api()
@@ -200,7 +219,8 @@ def main():
         end_datetime = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
 
         if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
-            create_google_calendar_event(service, appointment['studio_name'], appointment['address'], start_datetime, end_datetime)
+            description = appointment.get('regie', '')
+            create_google_calendar_event(service, appointment['studio_name'], appointment['address'], start_datetime, end_datetime, description)
         else:
             print(f"Event already exists: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
 
