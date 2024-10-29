@@ -190,7 +190,7 @@ def create_google_calendar_event(service, summary, location, start_time, end_tim
 def main():
     print("Starting main function...")
     # Filter out past appointments
-    current_date = datetime.now()
+    current_date = datetime.now(tz)
     future_appointments = []
 
     # Timezone for Europe/Berlin
