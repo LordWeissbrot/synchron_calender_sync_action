@@ -190,15 +190,19 @@ def create_google_calendar_event(service, summary, location, start_time, end_tim
 def main():
     print("Starting main function...")
     # Filter out past appointments
-    current_date = datetime.now(tz)
-    future_appointments = []
 
     # Timezone for Europe/Berlin
     tz = pytz.timezone('Europe/Berlin')
 
+    # Make current_date timezone-aware
+    current_date = datetime.now(tz)
+    future_appointments = []
+
     for appointment in appointments:
         start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
         end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
+
+        # Parse the naive datetime objects
         start_datetime_naive = datetime.strptime(start_datetime_str, '%d.%m.%Y %H:%M')
         end_datetime_naive = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
 
@@ -206,6 +210,7 @@ def main():
         start_datetime = tz.localize(start_datetime_naive)
         end_datetime = tz.localize(end_datetime_naive)
 
+        # Compare timezone-aware datetime objects
         if start_datetime >= current_date:
             appointment['start_datetime'] = start_datetime
             appointment['end_datetime'] = end_datetime
