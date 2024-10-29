@@ -5,6 +5,8 @@ import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone
+from dateutil import parser
+import pytz  # For Python versions < 3.9; use zoneinfo for 3.9+
 
 # Load environment variables from credentials.env file
 load_dotenv('credentials.env')
@@ -139,10 +141,10 @@ def fetch_future_events(service):
     return events
 
 def event_exists(service, summary, start_time, end_time):
-    time_min = (start_time - timedelta(minutes=1)).isoformat() + '+02:00'
-    time_max = (end_time + timedelta(minutes=1)).isoformat() + '+02:00'
+    time_min = (start_time - timedelta(minutes=1)).isoformat()
+    time_max = (end_time + timedelta(minutes=1)).isoformat()
     
-    print(f"Checking if event {summary}, Start: {start_time.isoformat() + '+02:00'}, End: {end_time.isoformat() + '+02:00'} already exists in Google Calendar...")
+    print(f"Checking if event {summary}, Start: {start_time.isoformat()}, End: {end_time.isoformat()} already exists in Google Calendar...")
     events_result = service.events().list(
         calendarId='primary',
         timeMin=time_min,
@@ -153,13 +155,17 @@ def event_exists(service, summary, start_time, end_time):
     events = events_result.get('items', [])
 
     for event in events:
-        event_start = event['start']['dateTime']
-        event_end = event['end']['dateTime']
+        event_start_str = event['start']['dateTime']
+        event_end_str = event['end']['dateTime']
         event_summary = event['summary']
 
+        # Parse event start and end times to datetime objects
+        event_start = parser.isoparse(event_start_str)
+        event_end = parser.isoparse(event_end_str)
+
         # Print statements for debugging
-        print(f"Comparing with event: {event_summary}, Start: {event_start}, End: {event_end}")
-        if event_summary == summary and event_start == start_time.isoformat() + '+02:00' and event_end == end_time.isoformat() + '+02:00':
+        print(f"Comparing with event: {event_summary}, Start: {event_start.isoformat()}, End: {event_end.isoformat()}")
+        if event_summary == summary and event_start == start_time and event_end == end_time:
             return True
     return False
 
@@ -187,11 +193,22 @@ def main():
     current_date = datetime.now()
     future_appointments = []
 
+    # Timezone for Europe/Berlin
+    tz = pytz.timezone('Europe/Berlin')
+
     for appointment in appointments:
         start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
-        start_datetime = datetime.strptime(start_datetime_str, '%d.%m.%Y %H:%M')
+        end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
+        start_datetime_naive = datetime.strptime(start_datetime_str, '%d.%m.%Y %H:%M')
+        end_datetime_naive = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
+
+        # Make datetime objects timezone-aware
+        start_datetime = tz.localize(start_datetime_naive)
+        end_datetime = tz.localize(end_datetime_naive)
 
         if start_datetime >= current_date:
+            appointment['start_datetime'] = start_datetime
+            appointment['end_datetime'] = end_datetime
             future_appointments.append(appointment)
 
     # Log the future appointments for testing
@@ -213,10 +230,8 @@ def main():
     # Log the appointments that would get created
     print("Appointments to be created in Google Calendar:")
     for appointment in future_appointments:
-        start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
-        end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
-        start_datetime = datetime.strptime(start_datetime_str, '%d.%m.%Y %H:%M')
-        end_datetime = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
+        start_datetime = appointment['start_datetime']
+        end_datetime = appointment['end_datetime']
 
         if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
             description = appointment.get('regie', '')
