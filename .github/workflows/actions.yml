@@ -32,5 +32,7 @@ jobs:
         CLIENT_ID: ${{ secrets.CLIENT_ID }}
         CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+        PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+        PUSHOVER_USER_KEY: ${{ secrets.PUSHOVER_USER_KEY }}
       run: |
         python main.py
