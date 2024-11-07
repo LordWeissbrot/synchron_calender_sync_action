@@ -6,7 +6,9 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from datetime import datetime, timedelta, timezone
 from dateutil import parser
-import pytz  # For Python versions < 3.9; use zoneinfo for 3.9+
+import pytz
+import hashlib
+
 
 # Load environment variables from credentials.env file
 load_dotenv('credentials.env')
@@ -17,6 +19,8 @@ password = os.getenv('PASSWORD')
 client_id = os.getenv('CLIENT_ID')
 client_secret = os.getenv('CLIENT_SECRET')
 refresh_token = os.getenv('REFRESH_TOKEN')
+PUSHOVER_TOKEN = os.getenv('PUSHOVER_TOKEN')
+PUSHOVER_USER_KEY = os.getenv('PUSHOVER_USER_KEY')
 
 print("Starting script execution...")
 
@@ -133,64 +137,207 @@ def fetch_future_events(service):
     events_result = service.events().list(
         calendarId='primary',
         timeMin=now,
-        maxResults=20, #30
+        privateExtendedProperty='createdBySynchronScript=true',
+        maxResults=100,
         singleEvents=True,
         orderBy='startTime'
     ).execute()
     events = events_result.get('items', [])
+
+    # Print complete event details for debugging
+    for event in events:
+        print(f"Fetched event: {event['summary']}")
+        print(f"Description: {event.get('description', 'No description')}")
+        print(f"Location: {event.get('location', 'No location')}")
+        print(f"Extended Properties: {event.get('extendedProperties', {})}")
+        print("---")
+
     return events
 
-def event_exists(service, summary, start_time, end_time):
-    time_min = (start_time - timedelta(minutes=1)).isoformat()
-    time_max = (end_time + timedelta(minutes=1)).isoformat()
-    
-    print(f"Checking if event {summary}, Start: {start_time.isoformat()}, End: {end_time.isoformat()} already exists in Google Calendar...")
-    events_result = service.events().list(
-        calendarId='primary',
-        timeMin=time_min,
-        timeMax=time_max,
-        singleEvents=True,
-        orderBy='startTime'
-    ).execute()
-    events = events_result.get('items', [])
-
-    for event in events:
-        event_start_str = event['start']['dateTime']
-        event_end_str = event['end']['dateTime']
-        event_summary = event['summary']
-
-        # Parse event start and end times to datetime objects
-        event_start = parser.isoparse(event_start_str)
-        event_end = parser.isoparse(event_end_str)
-
-        # Print statements for debugging
-        print(f"Comparing with event: {event_summary}, Start: {event_start.isoformat()}, End: {event_end.isoformat()}")
-        if event_summary == summary and event_start == start_time and event_end == end_time:
-            return True
-    return False
-
-def create_google_calendar_event(service, summary, location, start_time, end_time, description=''):
+def create_google_calendar_event(service, appointment):
+    appointment_id = generate_appointment_id(appointment)
     event = {
-        'summary': summary,
-        'location': location,
-        'description': description,
+        'summary': appointment['studio_name'],
+        'location': appointment['address'],
+        'description': appointment.get('regie', ''),
         'start': {
-            'dateTime': start_time.isoformat(),
+            'dateTime': appointment['start_datetime'].isoformat(),
             'timeZone': 'Europe/Berlin',
         },
         'end': {
-            'dateTime': end_time.isoformat(),
+            'dateTime': appointment['end_datetime'].isoformat(),
             'timeZone': 'Europe/Berlin',
         },
+        'extendedProperties': {
+            'private': {
+                'createdBySynchronScript': 'true',
+                'appointment_id': appointment_id
+            }
+        }
     }
 
     event = service.events().insert(calendarId='primary', body=event).execute()
     print(f"Event created: {event.get('htmlLink')}")
+    
+    # Send push notification for new appointment
+    send_push_notification(
+        "New Appointment Added",
+        format_notification_message(appointment),
+        priority=1
+    )
+
+def update_google_calendar_event(service, event_id, appointment):
+    appointment_id = appointment['appointment_id']
+    # Print debug information before update
+    print(f"Updating event {event_id} with new details:")
+    print(f"Studio: {appointment['studio_name']}")
+    print(f"Location: {appointment['address']}")
+    print(f"Regie: {appointment.get('regie', 'No regie')}")
+
+    event = {
+        'summary': appointment['studio_name'],
+        'location': appointment['address'],
+        'description': appointment.get('regie', ''),
+        'start': {
+            'dateTime': appointment['start_datetime'].isoformat(),
+            'timeZone': 'Europe/Berlin',
+        },
+        'end': {
+            'dateTime': appointment['end_datetime'].isoformat(),
+            'timeZone': 'Europe/Berlin',
+        },
+        'extendedProperties': {
+            'private': {
+                'createdBySynchronScript': 'true',
+                'appointment_id': appointment_id
+            }
+        }
+    }
+
+    try:
+        updated_event = service.events().update(
+            calendarId='primary',
+            eventId=event_id,
+            body=event
+        ).execute()
+
+        print(f"Event updated successfully: {updated_event.get('htmlLink')}")
+        print(f"Updated event description: {updated_event.get('description', 'No description')}")
+
+        # Send push notification for updated appointment
+        send_push_notification(
+            "Appointment Updated",
+            format_notification_message(appointment, action="updated"),
+            priority=1
+        )
+
+        return updated_event
+
+    except Exception as e:
+        print(f"Error updating event: {e}")
+        return None
+
+
+def needs_update(event, appointment):
+    event_start = parser.isoparse(event['start']['dateTime']).astimezone(pytz.timezone('Europe/Berlin'))
+    event_end = parser.isoparse(event['end']['dateTime']).astimezone(pytz.timezone('Europe/Berlin'))
+
+    appointment_start = appointment['start_datetime']
+    appointment_end = appointment['end_datetime']
+
+    current_regie = event.get('description', '').strip()
+    new_regie = appointment.get('regie', '').strip()
+
+    # Print debug information
+    print("Checking if event needs update:")
+    print(f"Start times match: {event_start == appointment_start}")
+    print(f"End times match: {event_end == appointment_end}")
+    print(f"Locations match: {event.get('location', '') == appointment['address']}")
+    print(f"Current regie: '{current_regie}'")
+    print(f"New regie: '{new_regie}'")
+    print(f"Regie matches: {current_regie == new_regie}")
+
+    return (
+        event_start != appointment_start or
+        event_end != appointment_end or
+        event.get('location', '') != appointment['address'] or
+        current_regie != new_regie
+    )
+
+def send_push_notification(title, message, priority=0):
+    """
+    Send push notification using Pushover.
+    Priority: -2 to 2 (-2 is lowest, 2 is highest/emergency)
+    """
+    print(f"Sending push notification: {title}")
+    
+    payload = {
+        'token': PUSHOVER_TOKEN,
+        'user': PUSHOVER_USER_KEY,
+        'title': title,
+        'message': message,
+        'priority': priority,
+        'sound': 'pushover'
+    }
+    
+    response = requests.post(
+        'https://api.pushover.net/1/messages.json',
+        data=payload
+    )
+    
+    if response.status_code == 200:
+        print("Push notification sent successfully")
+    else:
+        print(f"Failed to send push notification: {response.text}")
+
+def format_notification_message(appointment, action="added"):
+    """
+    Format the notification message for an appointment.
+    """
+    message = (
+        f"Appointment {action}:\n"
+        f"Studio: {appointment['studio_name']}\n"
+        f"Date: {appointment['date']}\n"
+        f"Time: {appointment['start_time']} - {appointment['end_time']}\n"
+        f"Location: {appointment['address']}"
+    )
+    
+    if appointment.get('regie'):  # Add regie information if available
+        message += f"\nRegie: {appointment['regie']}"
+        
+    return message
+        
+def generate_appointment_id(appointment):
+    # Concatenate date, studio_name, regie
+    id_string = f"{appointment['date']}_{appointment['studio_name']}_{appointment.get('regie', '')}"
+    # Generate a hash
+    appointment_id = hashlib.md5(id_string.encode('utf-8')).hexdigest()
+    return appointment_id     
+        
+def delete_google_calendar_event(service, event_id):
+    try:
+        service.events().delete(calendarId='primary', eventId=event_id).execute()
+        print(f"Event {event_id} deleted successfully.")
+    except Exception as e:
+        print(f"Failed to delete event {event_id}: {e}")
+        
+        
+def format_notification_message_from_key(key, action="cancelled"):
+    date, start_time, studio_name, regie = key
+    message = (
+        f"Appointment {action}:\n"
+        f"Studio: {studio_name}\n"
+        f"Date: {date}\n"
+        f"Time: {start_time}"
+    )
+    if regie:
+        message += f"\nRegie: {regie}"
+    return message
+
+# __________________________________________________________________
 
 def main():
     print("Starting main function...")
-    # Filter out past appointments
-
     # Timezone for Europe/Berlin
     tz = pytz.timezone('Europe/Berlin')
 
@@ -214,12 +361,15 @@ def main():
         if start_datetime >= current_date:
             appointment['start_datetime'] = start_datetime
             appointment['end_datetime'] = end_datetime
+            # Generate appointment_id
+            appointment_id = generate_appointment_id(appointment)
+            appointment['appointment_id'] = appointment_id
             future_appointments.append(appointment)
 
     # Log the future appointments for testing
     print("Future appointments from Synchron.de:")
     for appointment in future_appointments:
-        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}, Regie: {appointment['regie']}")
+        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}, Regie: {appointment['regie']}, ID: {appointment['appointment_id']}")
 
     # Authenticate Google Calendar API
     service = authenticate_google_api()
@@ -230,19 +380,52 @@ def main():
     for event in future_events:
         start = event['start'].get('dateTime', event['start'].get('date'))
         end = event['end'].get('dateTime', event['end'].get('date'))
-        print(f"Summary: {event['summary']}, Start: {start}, End: {end}")
+        appointment_id = event.get('extendedProperties', {}).get('private', {}).get('appointment_id', '')
+        print(f"Summary: {event['summary']}, Start: {start}, End: {end}, ID: {appointment_id}")
 
-    # Log the appointments that would get created
-    print("Appointments to be created in Google Calendar:")
-    for appointment in future_appointments:
-        start_datetime = appointment['start_datetime']
-        end_datetime = appointment['end_datetime']
+    # Build a mapping from appointment_id to appointment
+    appointment_id_to_appointment = {appt['appointment_id']: appt for appt in future_appointments}
 
-        if not event_exists(service, appointment['studio_name'], start_datetime, end_datetime):
-            description = appointment.get('regie', '')
-            create_google_calendar_event(service, appointment['studio_name'], appointment['address'], start_datetime, end_datetime, description)
+    # Build a mapping from appointment_id to event
+    event_appointment_id_to_event = {}
+    for event in future_events:
+        appointment_id = event.get('extendedProperties', {}).get('private', {}).get('appointment_id', '')
+        if appointment_id:
+            event_appointment_id_to_event[appointment_id] = event
+
+    # Delete events that are no longer in appointments
+    events_to_delete = set(event_appointment_id_to_event.keys()) - set(appointment_id_to_appointment.keys())
+    for appointment_id in events_to_delete:
+        event = event_appointment_id_to_event[appointment_id]
+        delete_google_calendar_event(service, event['id'])
+        # Send notification
+        date_str = parser.isoparse(event['start']['dateTime']).strftime('%d.%m.%Y')
+        start_time_str = parser.isoparse(event['start']['dateTime']).strftime('%H:%M')
+        key = (date_str, start_time_str, event.get('summary', ''), event.get('description', ''))
+        send_push_notification(
+            "Appointment Cancelled",
+            format_notification_message_from_key(key, action="cancelled"),
+            priority=1
+        )
+
+    # Process each appointment
+    for appointment_id, appointment in appointment_id_to_appointment.items():
+        if appointment_id in event_appointment_id_to_event:
+            event = event_appointment_id_to_event[appointment_id]
+            needs_update_result = needs_update(event, appointment)
+            if needs_update_result:
+                print(f"Updating event for {appointment['studio_name']}")
+                update_google_calendar_event(
+                    service,
+                    event['id'],
+                    appointment
+                )
+            else:
+                print(f"Event already exists and is up to date: {appointment['studio_name']} on {appointment['date']}")
         else:
-            print(f"Event already exists: {appointment['studio_name']} on {appointment['date']} from {appointment['start_time']} to {appointment['end_time']} at {appointment['address']}")
+            print(f"Creating new event for {appointment['studio_name']}")
+            create_google_calendar_event(service, appointment)
+
 
 if __name__ == "__main__":
     main()
