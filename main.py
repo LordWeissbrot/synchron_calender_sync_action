@@ -366,31 +366,23 @@ def main():
             appointment['appointment_id'] = appointment_id
             future_appointments.append(appointment)
 
-    # Log the future appointments for testing
-    print("Future appointments from Synchron.de:")
-    for appointment in future_appointments:
-        print(f"Date: {appointment['date']}, Start Time: {appointment['start_time']}, End Time: {appointment['end_time']}, Studio: {appointment['studio_name']}, Address: {appointment['address']}, Regie: {appointment['regie']}, ID: {appointment['appointment_id']}")
-
     # Authenticate Google Calendar API
     service = authenticate_google_api()
 
     # Fetch future events from Google Calendar
     future_events = fetch_future_events(service)
-    print("Future events from Google Calendar:")
-    for event in future_events:
-        start = event['start'].get('dateTime', event['start'].get('date'))
-        end = event['end'].get('dateTime', event['end'].get('date'))
-        appointment_id = event.get('extendedProperties', {}).get('private', {}).get('appointment_id', '')
-        print(f"Summary: {event['summary']}, Start: {start}, End: {end}, ID: {appointment_id}")
 
-    # Build a mapping from appointment_id to appointment
+    # Build mappings
     appointment_id_to_appointment = {appt['appointment_id']: appt for appt in future_appointments}
-
-    # Build a mapping from appointment_id to event
     event_appointment_id_to_event = {}
+    
+    # Only include future events in the mapping
     for event in future_events:
         appointment_id = event.get('extendedProperties', {}).get('private', {}).get('appointment_id', '')
-        if appointment_id:
+        event_start = parser.isoparse(event['start']['dateTime'])
+        
+        # Only include events that haven't passed yet
+        if appointment_id and event_start >= current_date:
             event_appointment_id_to_event[appointment_id] = event
 
     # Delete events that are no longer in appointments
@@ -398,7 +390,7 @@ def main():
     for appointment_id in events_to_delete:
         event = event_appointment_id_to_event[appointment_id]
         delete_google_calendar_event(service, event['id'])
-        # Send notification
+        # Send notification only for genuine cancellations
         date_str = parser.isoparse(event['start']['dateTime']).strftime('%d.%m.%Y')
         start_time_str = parser.isoparse(event['start']['dateTime']).strftime('%H:%M')
         key = (date_str, start_time_str, event.get('summary', ''), event.get('description', ''))
@@ -408,7 +400,7 @@ def main():
             priority=1
         )
 
-    # Process each appointment
+    # Process each appointment (rest of the function remains the same)
     for appointment_id, appointment in appointment_id_to_appointment.items():
         if appointment_id in event_appointment_id_to_event:
             event = event_appointment_id_to_event[appointment_id]
@@ -425,7 +417,6 @@ def main():
         else:
             print(f"Creating new event for {appointment['studio_name']}")
             create_google_calendar_event(service, appointment)
-
 
 if __name__ == "__main__":
     main()
