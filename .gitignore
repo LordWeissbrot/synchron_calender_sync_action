@@ -46,3 +46,6 @@ env.bak/
 venv.bak/
 credentials.json
 refreshtoken.py
+.token.pickle
+*.pickle
+token.pickle
