@@ -68,7 +68,7 @@ if login_response.status_code == 200 and 'Termine' in login_response.text:
     soup = BeautifulSoup(appointments_html, 'html.parser')
 
     # Find all the appointment rows
-    appointment_rows = soup.find_all('tr', style='color: black; background: whitesmoke')[:5]  # Only take the first 5 entries
+    appointment_rows = soup.find_all('tr', style='color: black; background: whitesmoke')[:8]  # Only take the first 8 entries
 
     for row in appointment_rows:
         columns = row.find_all('td')
