@@ -1,5 +1,8 @@
 import requests
 from bs4 import BeautifulSoup
+import sys
+from typing import Tuple, Optional
+import time
 from dotenv import load_dotenv
 import os
 from google.oauth2.credentials import Credentials
@@ -117,6 +120,136 @@ if login_response.status_code == 200 and 'Termine' in login_response.text:
         print(f"Appointment: {appointment['date']}, {appointment['start_time']} - {appointment['end_time']}, {appointment['studio_name']}, {appointment['address']}, {appointment['regie']}")
 else:
     print('Login failed. Please check your credentials.')
+    
+def login_with_retry(
+    session: requests.Session,
+    base_url: str,
+    login_url: str,
+    username: str,
+    password: str,
+    max_retries: int = 3,
+    retry_delay: int = 5
+) -> Tuple[bool, Optional[list]]:
+    """
+    Attempts to login with retry mechanism.
+    
+    Args:
+        session: requests Session object
+        base_url: Base URL for the website
+        login_url: Login endpoint URL
+        username: Login username
+        password: Login password
+        max_retries: Maximum number of retry attempts
+        retry_delay: Delay between retries in seconds
+    
+    Returns:
+        Tuple of (success_status: bool, appointments: Optional[list])
+    """
+    appointments = []
+    
+    for attempt in range(max_retries):
+        try:
+            print(f"Login attempt {attempt + 1}/{max_retries}...")
+            
+            # Get CSRF token
+            response = session.get(base_url)
+            response.raise_for_status()  # Raise exception for bad status codes
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            csrf_token_element = soup.find('input', {'name': '_token'})
+            
+            if not csrf_token_element:
+                print(f"Attempt {attempt + 1}: Failed to retrieve CSRF token")
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                continue
+                
+            csrf_token = csrf_token_element['value']
+            print(f"Retrieved CSRF token: {csrf_token}")
+            
+            # Prepare login payload
+            login_payload = {
+                'username': username,
+                'password': password,
+                '_token': csrf_token
+            }
+            
+            # Attempt login
+            login_response = session.post(login_url, data=login_payload)
+            login_response.raise_for_status()
+            
+            # Verify successful login by checking for 'Termine' in response
+            if 'Termine' in login_response.text:
+                print("Login successful!")
+                
+                # Get appointments
+                appointments_response = session.get(f"{base_url}/events?is_app=0")
+                appointments_response.raise_for_status()
+                
+                # Parse appointments (keeping your existing parsing logic)
+                appointments = parse_appointments(appointments_response.text)
+                return True, appointments
+            else:
+                print(f"Attempt {attempt + 1}: Login response didn't contain expected content")
+                
+        except requests.RequestException as e:
+            print(f"Attempt {attempt + 1} failed with error: {str(e)}")
+        
+        if attempt < max_retries - 1:
+            print(f"Waiting {retry_delay} seconds before next attempt...")
+            time.sleep(retry_delay)
+    
+    print(f"Failed to login after {max_retries} attempts")
+    return False, None
+
+def parse_appointments(html_content: str) -> list:
+    """
+    Parses the appointments from the HTML content.
+    Keeps your existing appointment parsing logic.
+    """
+    appointments = []
+    soup = BeautifulSoup(html_content, 'html.parser')
+    appointment_rows = soup.find_all('tr', style='color: black; background: whitesmoke')[:8]
+
+    for row in appointment_rows:
+        columns = row.find_all('td')
+        if len(columns) == 5:
+            date_element = row.find_previous('tr', style='color: white; background: #9BC7E6; width: 100px')
+            date = date_element.find_all('td')[1].get_text(strip=True) if date_element else ''
+
+            time_range = columns[0].get_text(strip=True).replace('\n', ' ')
+            start_time = time_range[:5]
+            end_time = time_range[5:].strip()
+
+            studio_name_element = columns[1].find('b')
+            studio_name = studio_name_element.get_text(strip=True) if studio_name_element else ''
+
+            column_texts = list(columns[1].stripped_strings)
+            if studio_name in column_texts:
+                column_texts.remove(studio_name)
+
+            address = ''
+            regie = ''
+
+            for text in column_texts:
+                if text.startswith('Regie:'):
+                    regie = text
+                else:
+                    address += text + ' '
+
+            address = address.strip()
+
+            appointment = {
+                'date': date,
+                'start_time': start_time,
+                'end_time': end_time,
+                'studio_name': studio_name,
+                'address': address,
+                'regie': regie
+            }
+            appointments.append(appointment)
+    
+    return appointments
 
 def authenticate_google_api():
     print("Authenticating Google Calendar API...")
@@ -249,13 +382,13 @@ def needs_update(event, appointment):
     new_regie = appointment.get('regie', '').strip()
 
     # Print debug information
-    print("Checking if event needs update:")
-    print(f"Start times match: {event_start == appointment_start}")
-    print(f"End times match: {event_end == appointment_end}")
-    print(f"Locations match: {event.get('location', '') == appointment['address']}")
-    print(f"Current regie: '{current_regie}'")
-    print(f"New regie: '{new_regie}'")
-    print(f"Regie matches: {current_regie == new_regie}")
+    print(f"Checking if event {appointment} needs update:")
+    # print(f"Start times match: {event_start == appointment_start}")
+    # print(f"End times match: {event_end == appointment_end}")
+    # print(f"Locations match: {event.get('location', '') == appointment['address']}")
+    # print(f"Current regie: '{current_regie}'")
+    # print(f"New regie: '{new_regie}'")
+    # print(f"Regie matches: {current_regie == new_regie}")
 
     return (
         event_start != appointment_start or
@@ -338,10 +471,31 @@ def format_notification_message_from_key(key, action="cancelled"):
 
 def main():
     print("Starting main function...")
-    # Timezone for Europe/Berlin
+    
+    # Create a session
+    session = requests.Session()
+    
+    # Attempt login with retry mechanism
+    login_success, appointments = login_with_retry(
+        session=session,
+        base_url=base_url,
+        login_url=login_url,
+        username=username,
+        password=password,
+        max_retries=3,
+        retry_delay=5
+    )
+    
+    if not login_success:
+        print("Failed to login after all retry attempts. Exiting script.")
+        sys.exit(1)
+    
+    if not appointments:
+        print("No appointments found. Exiting script.")
+        sys.exit(0)
+        
+    # Continue with the rest of your existing main() function...
     tz = pytz.timezone('Europe/Berlin')
-
-    # Make current_date timezone-aware
     current_date = datetime.now(tz)
     future_appointments = []
 
@@ -349,48 +503,47 @@ def main():
         start_datetime_str = f"{appointment['date']} {appointment['start_time']}"
         end_datetime_str = f"{appointment['date']} {appointment['end_time']}"
 
-        # Parse the naive datetime objects
         start_datetime_naive = datetime.strptime(start_datetime_str, '%d.%m.%Y %H:%M')
         end_datetime_naive = datetime.strptime(end_datetime_str, '%d.%m.%Y %H:%M')
 
-        # Make datetime objects timezone-aware
         start_datetime = tz.localize(start_datetime_naive)
         end_datetime = tz.localize(end_datetime_naive)
 
-        # Compare timezone-aware datetime objects
         if start_datetime >= current_date:
             appointment['start_datetime'] = start_datetime
             appointment['end_datetime'] = end_datetime
-            # Generate appointment_id
-            appointment_id = generate_appointment_id(appointment)
-            appointment['appointment_id'] = appointment_id
+            appointment['appointment_id'] = generate_appointment_id(appointment)
             future_appointments.append(appointment)
 
-    # Authenticate Google Calendar API
     service = authenticate_google_api()
-
-    # Fetch future events from Google Calendar
     future_events = fetch_future_events(service)
 
-    # Build mappings
+    # Only proceed with calendar operations if we have appointments
+    if future_appointments:
+        process_calendar_events(service, future_appointments, future_events, current_date)
+    else:
+        print("No future appointments found. Skipping calendar operations.")
+
+def process_calendar_events(service, future_appointments, future_events, current_date):
+    """
+    Process calendar events with proper error handling
+    """
     appointment_id_to_appointment = {appt['appointment_id']: appt for appt in future_appointments}
     event_appointment_id_to_event = {}
     
-    # Only include future events in the mapping
     for event in future_events:
         appointment_id = event.get('extendedProperties', {}).get('private', {}).get('appointment_id', '')
         event_start = parser.isoparse(event['start']['dateTime'])
         
-        # Only include events that haven't passed yet
         if appointment_id and event_start >= current_date:
             event_appointment_id_to_event[appointment_id] = event
 
-    # Delete events that are no longer in appointments
+    # Only delete events if we successfully fetched new appointments
     events_to_delete = set(event_appointment_id_to_event.keys()) - set(appointment_id_to_appointment.keys())
     for appointment_id in events_to_delete:
         event = event_appointment_id_to_event[appointment_id]
         delete_google_calendar_event(service, event['id'])
-        # Send notification only for genuine cancellations
+        
         date_str = parser.isoparse(event['start']['dateTime']).strftime('%d.%m.%Y')
         start_time_str = parser.isoparse(event['start']['dateTime']).strftime('%H:%M')
         key = (date_str, start_time_str, event.get('summary', ''), event.get('description', ''))
@@ -400,24 +553,19 @@ def main():
             priority=1
         )
 
-    # Process each appointment (rest of the function remains the same)
     for appointment_id, appointment in appointment_id_to_appointment.items():
         if appointment_id in event_appointment_id_to_event:
             event = event_appointment_id_to_event[appointment_id]
-            needs_update_result = needs_update(event, appointment)
-            if needs_update_result:
-                print(f"Updating event for {appointment['studio_name']}")
-                update_google_calendar_event(
-                    service,
-                    event['id'],
-                    appointment
-                )
-            else:
-                print(f"Event already exists and is up to date: {appointment['studio_name']} on {appointment['date']}")
+            if needs_update(event, appointment):
+                print(f"Updated required for: {appointment}")
+                update_google_calendar_event(service, event['id'], appointment)
         else:
-            print(f"Creating new event for {appointment['studio_name']}")
             create_google_calendar_event(service, appointment)
 
 if __name__ == "__main__":
-    main()
-    print("Main function executed successfully.")
+    try:
+        main()
+        print("Main function executed successfully.")
+    except Exception as e:
+        print(f"Script failed with error: {str(e)}")
+        sys.exit(1)
