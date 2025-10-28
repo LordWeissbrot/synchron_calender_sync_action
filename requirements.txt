@@ -9,4 +9,4 @@ pytz==2023.3
 geopy
 pandas
 python-telegram-bot==13.15
-pytz
+packaging>=24.0
