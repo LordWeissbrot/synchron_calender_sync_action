@@ -1,8 +1,8 @@
 name: run Synchron to Google Calendar
 
 on:
-  schedule:
-   - cron: '*/15 * * * *'
+  #schedule:
+   #- cron: '*/15 * * * *'
   workflow_dispatch:
 
 
